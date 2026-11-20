@@ -1,73 +1,109 @@
-# Basic Security Scanner
+# secscan
 
-A simple Python tool for initial security auditing: scans open ports,
-checks the SSL/TLS certificate, and verifies HTTP security headers — then
-generates a professional HTML report.
+[![CI](https://github.com/rzanaj07/security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/rzanaj07/security-scanner/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-## ⚠️ Legal notice — read before use
+A defensive security scanner for an initial audit of a host: it finds exposed services,
+checks the TLS certificate and verifies HTTP security headers, then rates every issue by
+severity in an HTML and/or JSON report.
 
-Use this tool **ONLY** against:
-- systems you own yourself (server, VM, laptop), or
-- systems for which you have **written permission** (contract/authorization) from the owner.
+## ⚠️ Legal notice: read before use
 
-Scanning systems you do not own without authorization is **illegal** in almost every country
-(even if the intent is "just for learning" or "to help"). When working with
-real clients, always sign an authorization agreement (Rules of
-Engagement) before scanning their systems.
+Use this tool **only** against:
+- systems you own (server, VM, laptop), or
+- systems whose owner has given you **written permission** (contract / rules of engagement).
+
+Scanning systems without authorization is illegal in almost every country, even if the
+intent is "just to learn" or "to help". secscan only observes; it does not exploit anything.
 
 ## Installation
 
-```bash
-pip install requests
-```
+Requires Python 3.10+.
 
-(All other modules — `socket`, `ssl`, `concurrent.futures` — are part of
-the Python standard library and don't require installation.)
+```bash
+git clone https://github.com/rzanaj07/security-scanner.git
+cd security-scanner
+python -m venv .venv
+# Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
+pip install -e .
+```
 
 ## Usage
 
 ```bash
-python3 main.py <target>
-
-# Examples:
-python3 main.py example.com
-python3 main.py 192.168.1.10
-python3 main.py mywebsite.com -o client_report.html
+secscan example.com                         # all checks, HTML report report_example_com.html
+secscan 192.168.1.10 -o client_report.html  # custom report name
+secscan https://example.com --json out.json # HTML + JSON
+secscan example.com --checks tls,headers    # only some checks
+secscan example.com --fail-on high          # exit code 1 if any HIGH/CRITICAL finding (for CI)
+python -m secscan --help                    # all options
 ```
 
-The HTML report is saved in the directory where you run the script — open it with any browser.
+| Exit code | Meaning |
+|---|---|
+| 0 | Scan finished (and `--fail-on` threshold not reached) |
+| 1 | A finding at or above the `--fail-on` severity was found |
+| 2 | Error: target could not be resolved, report could not be written |
+
+## Checks
+
+| Check | What it looks for |
+|---|---|
+| `ports` | 20 common service ports with passive banner grabbing; flags risky exposed services (Telnet, FTP, SMB, RDP, VNC, databases) |
+| `tls` | Certificate trust, expiry (expired / < 30 days) and the negotiated protocol version |
+| `headers` | HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy; version disclosure in `Server` / `X-Powered-By`; plain HTTP |
+
+Every issue is reported as a **finding** with an ID, a severity (`critical`, `high`, `medium`,
+`low`, `info`), evidence and a recommendation.
 
 ## Project structure
 
-| File | Function |
-|---|---|
-| `port_scanner.py` | Scans ~20 of the most common ports (SSH, HTTP, DB, etc.) with threading |
-| `ssl_checker.py` | Checks the SSL/TLS certificate: expiration, protocol, issuer |
-| `header_checker.py` | Checks 6 main HTTP security headers |
-| `report_generator.py` | Builds the final HTML report from the results |
-| `main.py` | Orchestrates everything — the program's entry point |
+```
+src/secscan/
+├── cli.py               # command-line interface
+├── scanner.py           # runs checks against a target
+├── target.py            # parses and resolves the target
+├── models.py            # Finding, CheckResult, ScanResult, Severity
+├── checks/
+│   ├── base.py          # Check interface, ScanConfig, ScanContext
+│   ├── ports.py
+│   ├── tls.py
+│   └── headers.py
+└── reporting/
+    ├── html.py          # Jinja2, auto-escaped
+    ├── json_report.py
+    └── templates/report.html
+tests/                   # pytest suite, uses local test servers only
+```
 
-## What it currently checks
+### Adding a check
 
-- **Open ports** — the 20 most critical ports (FTP, SSH, HTTP/S, main DBs, RDP, VNC, etc.) + banner grabbing
-- **SSL/TLS** — certificate expiration, outdated protocol (SSLv2/3, TLS 1.0/1.1), certificate verification
-- **HTTP Headers** — HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+Subclass `Check`, set `name` and `title`, implement `run(ctx) -> CheckResult`, and register it
+in `CHECKS` in `src/secscan/checks/__init__.py`. Results from earlier checks are available in
+`ctx.results`.
 
-## Ideas for expansion (next steps)
+## Development
 
-- **CVE lookup**: integration with the NVD API (`https://services.nvd.nist.gov/rest/json/cves/2.0`) to
-  compare found service versions (from banner grabbing) against known vulnerabilities
-- **Backup module**: add a separate script (`backup_agent.py`) that does backup + encryption + cloud upload
-  to offer as an additional service to clients
-- **Multi-target**: read a list of IPs/hostnames from a CSV file, scan them all at once
-- **PDF export**: generate the report directly as PDF (not just HTML) with `weasyprint` or by converting the HTML
-- **Scheduling**: integrate with `cron` for automatic periodic scans + email notification if new issues are found
-- **Web dashboard**: wrap these modules with Flask/FastAPI to have a web interface instead of the CLI
+```bash
+pip install -e ".[dev]"
+pytest              # tests
+ruff check .        # lint
+ruff format .       # format
+mypy                # type check (strict)
+```
 
-## Technical note
+CI runs all of the above on Python 3.10, 3.12 and 3.13 for every push and pull request.
 
-This tool only identifies possible **signs** of problems (open ports,
-missing headers, outdated certificate). It does not perform exploitation or active attacks — it is a
-**defensive/informational** tool, suitable for initial audits and demos
-with clients. For more in-depth testing (real penetration testing), you need
-additional tools and certifications (e.g. OSCP) and always clear authorization.
+## Roadmap
+
+- **Phase 2:** probe every TLS version separately (detect TLS 1.0/1.1 support), certificate
+  details for untrusted certs, TLS on all detected ports, HTTP to HTTPS redirect check, header
+  value validation, cookie flags, custom port ranges, IPv6
+- **Phase 3:** rich console output, risk score, PDF export, multi-target scans, CVE lookup from
+  service banners (NVD), DNS / email security checks (SPF, DMARC, CAA)
+- **Phase 4:** Docker image, PyPI release, scheduled scans with diffing, web dashboard
+
+## License
+
+[MIT](LICENSE)
