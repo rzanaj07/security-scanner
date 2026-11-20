@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security Report - {{ scan.target }}</title>
+<style>
+  :root {
+    --ink: #1f2a44; --muted: #667085; --line: #e4e7ec; --bg: #f8f9fb; --card: #fff; --accent: #2e6f5e;
+    --critical: #7a0916; --critical-bg: #fde8ea;
+    --high: #b42318; --high-bg: #fef3f2;
+    --medium: #b54708; --medium-bg: #fffaeb;
+    --low: #175cd3; --low-bg: #eff8ff;
+    --info: #475467; --info-bg: #f2f4f7;
+  }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: var(--ink);
+         background: var(--bg); max-width: 960px; margin: 0 auto; padding: 32px 16px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  h2 { margin: 36px 0 12px; font-size: 19px; color: var(--accent); }
+  h3 { margin: 0 0 10px; font-size: 16px; }
+  .meta { color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 24px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-top: 4px solid currentColor;
+          border-radius: 8px; padding: 12px; text-align: center; }
+  .tile .n { display: block; font-size: 26px; font-weight: 700; color: var(--ink); }
+  .tile .l { font-size: 12px; font-weight: 600; letter-spacing: .05em; }
+  .sev-critical { color: var(--critical); } .sev-high { color: var(--high); }
+  .sev-medium { color: var(--medium); } .sev-low { color: var(--low); } .sev-info { color: var(--info); }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px;
+           font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+  .badge.sev-critical { background: var(--critical-bg); } .badge.sev-high { background: var(--high-bg); }
+  .badge.sev-medium { background: var(--medium-bg); } .badge.sev-low { background: var(--low-bg); }
+  .badge.sev-info { background: var(--info-bg); }
+  .badge.ok { background: #ecfdf3; color: #067647; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
+          border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { background: #f2f5f4; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: 0; }
+  .desc { color: var(--muted); margin-top: 2px; }
+  .fid { color: var(--muted); font-size: 11px; font-family: ui-monospace, Consolas, monospace; margin-top: 4px; }
+  code { display: inline-block; margin-top: 6px; padding: 2px 6px; background: var(--info-bg); border-radius: 4px;
+         font: 12px ui-monospace, Consolas, monospace; word-break: break-all; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px;
+          margin-bottom: 14px; }
+  .card table { border: 0; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+  dt { color: var(--muted); } dd { margin: 0; word-break: break-word; }
+  .error { color: var(--high); }
+  .disclaimer { margin-top: 40px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  @media (max-width: 640px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
+  @media print { body { background: #fff; } .card, table { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Security Audit Report</h1>
+  <div class="meta">
+    Target <strong>{{ scan.target }}</strong> ({{ scan.address }})
+    &middot; {{ started }}{% if duration %} &middot; took {{ duration }}{% endif %}
+    &middot; secscan {{ version }}
+  </div>
+</header>
+
+<section class="tiles" aria-label="Findings by severity">
+  {% for sev, n in counts.items() %}
+  <div class="tile sev-{{ sev }}"><span class="n">{{ n }}</span><span class="l">{{ sev | upper }}</span></div>
+  {% endfor %}
+</section>
+
+<h2>Findings</h2>
+{% if findings %}
+<table>
+  <thead><tr><th style="width:90px">Severity</th><th>Finding</th><th style="width:34%">Recommendation</th></tr></thead>
+  <tbody>
+  {% for f in findings %}
+    <tr>
+      <td><span class="badge sev-{{ f.severity.value }}">{{ f.severity.value | upper }}</span></td>
+      <td>
+        <strong>{{ f.title }}</strong>
+        {% if f.description %}<div class="desc">{{ f.description }}</div>{% endif %}
+        {% if f.evidence %}<code>{{ f.evidence }}</code>{% endif %}
+        <div class="fid">{{ f.id }}</div>
+      </td>
+      <td>{{ f.recommendation }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="card"><span class="badge ok">NO FINDINGS</span> None of the checks reported an issue.</div>
+{% endif %}
+
+<h2>Check details</h2>
+{% for r in scan.results %}
+<section class="card">
+  <h3>{{ r.title }}</h3>
+  {% if r.error %}
+  <p class="error">Check could not complete: {{ r.error }}</p>
+  {% elif r.check == "ports" %}
+    <p class="desc">{{ r.data.open | length }} open of {{ r.data.scanned }} ports checked.</p>
+    {% if r.data.open %}
+    <table>
+      <thead><tr><th>Port</th><th>Service (guessed)</th><th>Banner</th></tr></thead>
+      <tbody>
+      {% for p in r.data.open %}
+        <tr><td>{{ p.port }}</td><td>{{ p.service }}</td><td>{% if p.banner %}<code>{{ p.banner }}</code>{% else %}&mdash;{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  {% elif r.check == "tls" %}
+    {% if r.data.reachable %}
+    <dl>
+      <dt>Port</dt><dd>{{ r.data.port }}</dd>
+      <dt>Protocol</dt><dd>{{ r.data.protocol or "unknown" }}</dd>
+      <dt>Subject</dt><dd>{{ r.data.subject or "unknown" }}</dd>
+      <dt>Issuer</dt><dd>{{ r.data.issuer or "unknown" }}</dd>
+      <dt>Valid until</dt><dd>{{ r.data.not_after or "unknown" }}</dd>
+      {% if r.data.verify_error %}<dt>Verification</dt><dd class="error">{{ r.data.verify_error }}</dd>{% endif %}
+    </dl>
+    {% else %}
+    <p class="desc">No TLS service answered on port {{ r.data.port }}{% if r.data.error %} ({{ r.data.error }}){% endif %}.</p>
+    {% endif %}
+  {% elif r.check == "headers" %}
+    <dl>
+      <dt>URL</dt><dd>{{ r.data.final_url }} (HTTP {{ r.data.status_code }})</dd>
+      <dt>Present</dt><dd>{% for h, v in r.data.present.items() %}<div><strong>{{ h }}</strong>: <code>{{ v }}</code></div>{% else %}none{% endfor %}</dd>
+      <dt>Missing</dt><dd>{{ r.data.missing | join(", ") or "none" }}</dd>
+    </dl>
+  {% endif %}
+</section>
+{% endfor %}
+
+<p class="disclaimer">
+  Generated automatically by secscan. Automated checks indicate possible issues and are not a substitute
+  for a full manual assessment. Scan only systems you own or have written authorization to test.
+</p>
+</body>
+</html>
