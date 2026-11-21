@@ -37,7 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Defensive security scanner: open ports, TLS certificate, HTTP headers.",
         epilog=LEGAL_NOTICE,
     )
-    p.add_argument("target", help="hostname, IP address or URL (e.g. example.com, 10.0.0.5)")
+    p.add_argument(
+        "target",
+        help="hostname, IP address or URL (e.g. example.com, 10.0.0.5); "
+        "or use `secscan serve` to start the web dashboard",
+    )
     p.add_argument("-o", "--output", help="HTML report path (default: report_<target>.html)")
     p.add_argument("--json", metavar="PATH", help="also write a JSON report to PATH")
     p.add_argument("--no-html", action="store_true", help="do not write the HTML report")
@@ -66,7 +70,58 @@ def _default_report_name(host: str) -> str:
     return f"report_{re.sub(r'[^A-Za-z0-9_-]', '_', host)}.html"
 
 
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def build_serve_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="secscan serve",
+        description="Start the local web dashboard.",
+        epilog=LEGAL_NOTICE,
+    )
+    p.add_argument(
+        "--host", default="127.0.0.1", help="interface to listen on (default: 127.0.0.1)"
+    )
+    p.add_argument("--port", type=int, default=8000, help="port to listen on (default: 8000)")
+    p.add_argument("--db", default=None, help="SQLite database path (default: ~/.secscan/scans.db)")
+    p.add_argument("--no-browser", action="store_true", help="do not open a browser window")
+    return p
+
+
+def serve(argv: Sequence[str]) -> int:
+    args = build_serve_parser().parse_args(argv)
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from secscan.store import DEFAULT_DB_PATH
+    from secscan.web.app import create_app
+
+    local = args.host in LOCAL_HOSTS
+    if not local:
+        print(
+            "WARNING: the dashboard has no login. Anyone who can reach "
+            f"{args.host}:{args.port} can start scans from this machine.",
+            file=sys.stderr,
+        )
+    db = args.db or DEFAULT_DB_PATH
+    app = create_app(db, allowed_hosts=["127.0.0.1", "localhost", "[::1]"] if local else None)
+
+    browse_host = "127.0.0.1" if local or args.host in ("0.0.0.0", "::") else args.host
+    url = f"http://{browse_host}:{args.port}/"
+    print(f"secscan {__version__} dashboard: {url}  (database: {db})")
+    print("Press Ctrl+C to stop.")
+    if not args.no_browser:
+        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "serve":
+        return serve(argv[1:])
     args = build_parser().parse_args(argv)
 
     try:
@@ -105,7 +160,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     counts = scan.severity_counts()
     summary = ", ".join(f"{n} {sev}" for sev, n in counts.items() if n) or "no findings"
-    print(f"\nSummary: {summary}")
+    print(f"\nScore: {scan.score()}/100 (grade {scan.grade()})")
+    print(f"Summary: {summary}")
 
     try:
         if not args.no_html:

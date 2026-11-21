@@ -5,8 +5,11 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 A defensive security scanner for an initial audit of a host: it finds exposed services,
-checks the TLS certificate and verifies HTTP security headers, then rates every issue by
-severity in an HTML and/or JSON report.
+checks the TLS certificate and verifies HTTP security headers, rates every issue by severity
+and gives the host a security score (0-100, grade A-F).
+
+Use it from the command line, or run the **local web dashboard** to start scans from the
+browser, follow them live, keep a history per target and see what changed since the last scan.
 
 ## ⚠️ Legal notice: read before use
 
@@ -29,7 +32,29 @@ python -m venv .venv
 pip install -e .
 ```
 
-## Usage
+## Web dashboard
+
+```bash
+secscan serve            # opens http://127.0.0.1:8000 in your browser
+secscan serve --port 9000 --no-browser --db ./scans.db
+```
+
+- Start scans from a form (an authorization confirmation is required for every scan)
+- Live progress while checks run; scans continue in the background
+- Every scan is stored in SQLite (default `~/.secscan/scans.db`)
+- Per-target security score with trend, and **new / fixed findings** compared with the
+  previous scan
+- Export any scan as an HTML or JSON report
+- REST API with interactive docs at `/api/docs`
+
+The dashboard has no login, so it listens on `127.0.0.1` only by default. It rejects requests
+for foreign hostnames (DNS-rebinding protection), sends strict security headers and renders
+all scanned data as text, never as markup. Use `--host 0.0.0.0` only on a trusted network.
+
+> If Windows blocks `secscan.exe` (e.g. by an Application Control policy), run
+> `python -m secscan ...` instead; it is the same program.
+
+## Command line
 
 ```bash
 secscan example.com                         # all checks, HTML report report_example_com.html
@@ -61,19 +86,24 @@ Every issue is reported as a **finding** with an ID, a severity (`critical`, `hi
 
 ```
 src/secscan/
-├── cli.py               # command-line interface
+├── cli.py               # command-line interface (`secscan`, `secscan serve`)
 ├── scanner.py           # runs checks against a target
 ├── target.py            # parses and resolves the target
-├── models.py            # Finding, CheckResult, ScanResult, Severity
+├── models.py            # Finding, CheckResult, ScanResult, Severity, score
+├── store.py             # SQLite scan history
 ├── checks/
 │   ├── base.py          # Check interface, ScanConfig, ScanContext
 │   ├── ports.py
 │   ├── tls.py
 │   └── headers.py
-└── reporting/
-    ├── html.py          # Jinja2, auto-escaped
-    ├── json_report.py
-    └── templates/report.html
+├── reporting/
+│   ├── html.py          # Jinja2, auto-escaped
+│   ├── json_report.py
+│   └── templates/report.html
+└── web/
+    ├── app.py           # FastAPI app: JSON API + dashboard
+    ├── service.py       # background scan runner, scan comparison
+    └── static/          # dashboard (HTML/CSS/vanilla JS, no build step)
 tests/                   # pytest suite, uses local test servers only
 ```
 
@@ -100,9 +130,9 @@ CI runs all of the above on Python 3.10, 3.12 and 3.13 for every push and pull r
 - **Phase 2:** probe every TLS version separately (detect TLS 1.0/1.1 support), certificate
   details for untrusted certs, TLS on all detected ports, HTTP to HTTPS redirect check, header
   value validation, cookie flags, custom port ranges, IPv6
-- **Phase 3:** rich console output, risk score, PDF export, multi-target scans, CVE lookup from
-  service banners (NVD), DNS / email security checks (SPF, DMARC, CAA)
-- **Phase 4:** Docker image, PyPI release, scheduled scans with diffing, web dashboard
+- **Phase 3:** PDF export, multi-target scans, CVE lookup from service banners (NVD),
+  DNS / email security checks (SPF, DMARC, CAA)
+- **Phase 4:** dashboard login, scheduled scans with alerts, Docker image, PyPI release
 
 ## License
 

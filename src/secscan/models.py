@@ -25,6 +25,24 @@ class Severity(str, Enum):
         return self.value
 
 
+# Points deducted from a perfect score of 100 for each finding of a severity.
+SEVERITY_PENALTY: dict[Severity, int] = {
+    Severity.CRITICAL: 40,
+    Severity.HIGH: 20,
+    Severity.MEDIUM: 8,
+    Severity.LOW: 3,
+    Severity.INFO: 0,
+}
+
+
+def grade_for(score: int) -> str:
+    """Letter grade for a 0-100 security score."""
+    for threshold, letter in ((90, "A"), (75, "B"), (60, "C"), (40, "D")):
+        if score >= threshold:
+            return letter
+    return "F"
+
+
 @dataclass
 class Finding:
     """A single security issue discovered by a check."""
@@ -48,6 +66,18 @@ class Finding:
             "references": list(self.references),
         }
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Finding:
+        return cls(
+            id=d["id"],
+            title=d["title"],
+            severity=Severity(d["severity"]),
+            description=d.get("description", ""),
+            evidence=d.get("evidence"),
+            recommendation=d.get("recommendation", ""),
+            references=list(d.get("references", [])),
+        )
+
 
 @dataclass
 class CheckResult:
@@ -69,6 +99,17 @@ class CheckResult:
             "error": self.error,
             "notes": list(self.notes),
         }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CheckResult:
+        return cls(
+            check=d["check"],
+            title=d["title"],
+            data=dict(d.get("data", {})),
+            findings=[Finding.from_dict(f) for f in d.get("findings", [])],
+            error=d.get("error"),
+            notes=list(d.get("notes", [])),
+        )
 
 
 @dataclass
@@ -98,13 +139,33 @@ class ScanResult:
         findings = self.findings
         return findings[0].severity if findings else None
 
+    def score(self) -> int:
+        """Security score from 0 (worst) to 100 (no deductions)."""
+        return max(0, 100 - sum(SEVERITY_PENALTY[f.severity] for f in self.findings))
+
+    def grade(self) -> str:
+        return grade_for(self.score())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
             "address": self.address,
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "score": self.score(),
+            "grade": self.grade(),
             "summary": self.severity_counts(),
             "findings": [f.to_dict() for f in self.findings],
             "checks": [r.to_dict() for r in self.results],
         }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ScanResult:
+        finished = d.get("finished_at")
+        return cls(
+            target=d["target"],
+            address=d["address"],
+            started_at=datetime.fromisoformat(d["started_at"]),
+            finished_at=datetime.fromisoformat(finished) if finished else None,
+            results=[CheckResult.from_dict(c) for c in d.get("checks", [])],
+        )

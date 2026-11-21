@@ -48,6 +48,10 @@
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
   dt { color: var(--muted); } dd { margin: 0; word-break: break-word; }
   .error { color: var(--high); }
+  .score { margin: 20px 0 0; font-size: 16px; }
+  .grade { display: inline-block; min-width: 28px; padding: 2px 8px; border-radius: 14px; color: #fff; font-weight: 800; text-align: center; }
+  .g-A { background: #18794e; } .g-B { background: #4c8b2b; } .g-C { background: #b58a00; }
+  .g-D { background: #c2620c; } .g-F { background: #c0281b; }
   .disclaimer { margin-top: 40px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
   @media (max-width: 640px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
   @media print { body { background: #fff; } .card, table { break-inside: avoid; } }
@@ -62,6 +66,8 @@
     &middot; secscan {{ version }}
   </div>
 </header>
+
+<p class="score">Security score <strong>{{ scan.score() }}/100</strong> &middot; grade <span class="grade g-{{ scan.grade() }}">{{ scan.grade() }}</span></p>
 
 <section class="tiles" aria-label="Findings by severity">
   {% for sev, n in counts.items() %}
