@@ -177,3 +177,47 @@ def test_unfinished_scans_are_marked_interrupted(tmp_path):
     scan = store.get(scan_id)
     assert scan["status"] == "failed"
     assert "Interrupted" in scan["error"]
+
+
+def test_ports_option_is_stored_and_used(client, monkeypatch):
+    seen = {}
+
+    def spy(self, ctx):
+        seen["ports"] = ctx.config.ports
+        return self.result()
+
+    monkeypatch.setattr(ConfigurableCheck, "run", spy)
+    scan = wait_done(client, start(client, ports="22,8000-8001"))
+    assert scan["options"] == {"ports": "22,8000-8001"}
+    assert list(seen["ports"]) == [22, 8000, 8001]
+
+
+def test_invalid_ports_rejected(client):
+    res = client.post(
+        "/api/scans", json={"target": "lab.local", "ports": "1-99999", "authorized": True}
+    )
+    assert res.status_code == 422
+    assert "65535" in res.json()["detail"]
+
+
+def test_old_database_is_migrated(tmp_path):
+    import sqlite3
+
+    from secscan.store import ScanStore
+
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE scans (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, "
+            "input TEXT NOT NULL, address TEXT, status TEXT NOT NULL, checks TEXT NOT NULL, "
+            "completed TEXT NOT NULL DEFAULT '[]', current_check TEXT, created_at TEXT NOT NULL, "
+            "started_at TEXT, finished_at TEXT, score INTEGER, grade TEXT, counts TEXT, "
+            "result TEXT, error TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO scans (target, input, status, checks, created_at) "
+            "VALUES ('a', 'a', 'done', '[]', '2026-01-01')"
+        )
+    store = ScanStore(db)
+    assert store.get(1)["options"] == {}
+    assert store.get(store.create("b", "b", [], {"ports": "80"}))["options"] == {"ports": "80"}

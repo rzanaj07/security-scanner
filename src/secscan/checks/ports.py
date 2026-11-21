@@ -31,6 +31,85 @@ COMMON_PORTS: dict[int, str] = {
     27017: "MongoDB",
 }
 
+# Ports where a TLS service is expected; the TLS check inspects these when they are open.
+TLS_PORTS = {443, 465, 636, 853, 989, 990, 992, 993, 994, 995, 5986, 8443, 9443}
+
+_EXTRA_NAMES = {
+    20: "FTP-Data",
+    69: "TFTP",
+    88: "Kerberos",
+    111: "RPC",
+    135: "MSRPC",
+    137: "NetBIOS-NS",
+    139: "NetBIOS",
+    161: "SNMP",
+    389: "LDAP",
+    514: "Syslog",
+    873: "rsync",
+    1723: "PPTP",
+    2375: "Docker",
+    2376: "Docker-TLS",
+    3000: "HTTP-Alt",
+    5000: "HTTP-Alt",
+    5672: "AMQP",
+    6443: "Kubernetes",
+    8081: "HTTP-Alt",
+    465: "SMTPS",
+    587: "Submission",
+    636: "LDAPS",
+    853: "DNS-over-TLS",
+    1433: "MSSQL",
+    1521: "Oracle",
+    2049: "NFS",
+    5985: "WinRM",
+    5986: "WinRM-HTTPS",
+    8000: "HTTP-Alt",
+    8888: "HTTP-Alt",
+    9200: "Elasticsearch",
+    9443: "HTTPS-Alt",
+    11211: "Memcached",
+}
+
+
+class PortSpecError(ValueError):
+    """Invalid --ports specification."""
+
+
+def service_name(port: int) -> str:
+    if port in COMMON_PORTS:
+        return COMMON_PORTS[port]
+    # A static table: socket.getservbyport is very slow on Windows for large ranges.
+    return _EXTRA_NAMES.get(port, "Unknown")
+
+
+def parse_port_spec(spec: str) -> dict[int, str]:
+    """Parse e.g. "common", "1-1024", "22,80,8000-8100", "common,3000", "all"."""
+    ports: set[int] = set()
+    for part in (p.strip().lower() for p in spec.split(",")):
+        if not part:
+            continue
+        if part in ("common", "default"):
+            ports.update(COMMON_PORTS)
+            continue
+        if part == "all":
+            ports.update(range(1, 65536))
+            continue
+        try:
+            if "-" in part:
+                lo_s, hi_s = part.split("-", 1)
+                lo, hi = int(lo_s), int(hi_s)
+            else:
+                lo = hi = int(part)
+        except ValueError:
+            raise PortSpecError(f"invalid port or range: {part!r}") from None
+        if not 1 <= lo <= hi <= 65535:
+            raise PortSpecError(f"ports must be between 1 and 65535: {part!r}")
+        ports.update(range(lo, hi + 1))
+    if not ports:
+        raise PortSpecError("no ports given")
+    return {p: service_name(p) for p in sorted(ports)}
+
+
 _DB = (
     Severity.HIGH,
     "A database service is reachable over the network.",
@@ -74,7 +153,8 @@ RISKY_PORTS: dict[int, tuple[Severity, str, str]] = {
 def scan_port(address: str, port: int, timeout: float) -> bool:
     """Return True if a TCP connection to address:port succeeds."""
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             return sock.connect_ex((address, port)) == 0
     except OSError:

@@ -61,6 +61,8 @@ secscan example.com                         # all checks, HTML report report_exa
 secscan 192.168.1.10 -o client_report.html  # custom report name
 secscan https://example.com --json out.json # HTML + JSON
 secscan example.com --checks tls,headers    # only some checks
+secscan 10.0.0.5 --ports 1-1024             # custom ports: 1-1024, 22,80,8000-8100, common,3000, all
+secscan ::1                                 # IPv6 works too
 secscan example.com --fail-on high          # exit code 1 if any HIGH/CRITICAL finding (for CI)
 python -m secscan --help                    # all options
 ```
@@ -75,9 +77,9 @@ python -m secscan --help                    # all options
 
 | Check | What it looks for |
 |---|---|
-| `ports` | 20 common service ports with passive banner grabbing; flags risky exposed services (Telnet, FTP, SMB, RDP, VNC, databases) |
-| `tls` | Certificate trust, expiry (expired / < 30 days) and the negotiated protocol version |
-| `headers` | HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy; version disclosure in `Server` / `X-Powered-By`; plain HTTP |
+| `ports` | Common service ports (or your own list/range) with banner grabbing; flags risky exposed services (Telnet, FTP, SMB, RDP, VNC, databases). IPv4 and IPv6. |
+| `tls` | Runs on every open TLS port (443, 8443, 993, 995, 465, 636, ...). Probes SSLv3 and TLS 1.0, 1.1, 1.2 and 1.3 one by one, probes for broken ciphers (RC4, 3DES, NULL, EXPORT), verifies trust like a browser (self-signed, hostname mismatch, untrusted chain) and inspects the certificate: expiry, names, key type/size, signature algorithm. |
+| `headers` | HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, **including their values** (short HSTS max-age, CSP `unsafe-inline`/`unsafe-eval`/wildcards, invalid values); HTTP to HTTPS redirect; cookie flags (Secure, HttpOnly, SameSite); version disclosure (`Server`, `X-Powered-By`, ...); falls back to HTTP when HTTPS is not available. |
 
 Every issue is reported as a **finding** with an ID, a severity (`critical`, `high`, `medium`,
 `low`, `info`), evidence and a recommendation.
@@ -127,9 +129,6 @@ CI runs all of the above on Python 3.10, 3.12 and 3.13 for every push and pull r
 
 ## Roadmap
 
-- **Phase 2:** probe every TLS version separately (detect TLS 1.0/1.1 support), certificate
-  details for untrusted certs, TLS on all detected ports, HTTP to HTTPS redirect check, header
-  value validation, cookie flags, custom port ranges, IPv6
 - **Phase 3:** PDF export, multi-target scans, CVE lookup from service banners (NVD),
   DNS / email security checks (SPF, DMARC, CAA)
 - **Phase 4:** dashboard login, scheduled scans with alerts, Docker image, PyPI release

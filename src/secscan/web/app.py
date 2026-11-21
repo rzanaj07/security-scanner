@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from secscan import __version__
 from secscan import checks as checks_module
+from secscan.checks.ports import PortSpecError
 from secscan.models import ScanResult
 from secscan.reporting import render_html
 from secscan.store import ScanStore
@@ -42,6 +43,7 @@ _REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'n
 class ScanRequest(BaseModel):
     target: str = Field(min_length=1, max_length=255)
     checks: list[str] | None = None
+    ports: str | None = Field(default=None, max_length=500)
     authorized: bool = False
 
 
@@ -111,8 +113,8 @@ def create_app(db_path: str | Path, allowed_hosts: list[str] | None = None) -> F
         if unknown:
             raise HTTPException(422, f"Unknown check(s): {', '.join(unknown)}")
         try:
-            scan_id, _ = service.submit(req.target, names)
-        except TargetError as e:
+            scan_id, _ = service.submit(req.target, names, (req.ports or "").strip() or None)
+        except (TargetError, PortSpecError) as e:
             raise HTTPException(422, str(e)) from e
         return {"id": scan_id}
 

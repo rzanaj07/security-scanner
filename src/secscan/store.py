@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS scans (
     address       TEXT,
     status        TEXT NOT NULL,              -- queued | running | done | failed
     checks        TEXT NOT NULL,              -- JSON list of check names
+    options       TEXT NOT NULL DEFAULT '{}', -- JSON scan options, e.g. {"ports": "1-1024"}
     completed     TEXT NOT NULL DEFAULT '[]', -- JSON list of finished check names
     current_check TEXT,
     created_at    TEXT NOT NULL,
@@ -36,9 +37,9 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE INDEX IF NOT EXISTS idx_scans_target ON scans (target, id);
 """
 
-_JSON_COLUMNS = ("checks", "completed", "counts", "result")
+_JSON_COLUMNS = ("checks", "options", "completed", "counts", "result")
 _SUMMARY_COLUMNS = (
-    "id, target, input, address, status, checks, completed, current_check, created_at, "
+    "id, target, input, address, status, checks, options, completed, current_check, created_at, "
     "started_at, finished_at, score, grade, counts, error"
 )
 
@@ -64,6 +65,9 @@ class ScanStore:
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(scans)")}
+            if "options" not in columns:  # databases created before scan options existed
+                conn.execute("ALTER TABLE scans ADD COLUMN options TEXT NOT NULL DEFAULT '{}'")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -76,12 +80,18 @@ class ScanStore:
         finally:
             conn.close()
 
-    def create(self, target: str, raw_input: str, checks: list[str]) -> int:
+    def create(
+        self,
+        target: str,
+        raw_input: str,
+        checks: list[str],
+        options: dict[str, Any] | None = None,
+    ) -> int:
         with self._connect() as conn:
             cur = conn.execute(
-                "INSERT INTO scans (target, input, status, checks, created_at) "
-                "VALUES (?, ?, 'queued', ?, ?)",
-                (target, raw_input, json.dumps(checks), _now()),
+                "INSERT INTO scans (target, input, status, checks, options, created_at) "
+                "VALUES (?, ?, 'queued', ?, ?, ?)",
+                (target, raw_input, json.dumps(checks), json.dumps(options or {}), _now()),
             )
             return int(cur.lastrowid or 0)
 

@@ -14,7 +14,7 @@ from secscan.target import Target
 class ScanConfig:
     connect_timeout: float = 1.0  # per-port TCP connect timeout
     timeout: float = 6.0  # TLS handshake / HTTP request timeout
-    workers: int = 50
+    workers: int = 100
     ports: dict[int, str] | None = None  # None = the default common-port list
 
 

@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from secscan import __version__
 from secscan.checks import CHECKS, Check, ScanConfig
+from secscan.checks.ports import PortSpecError, parse_port_spec
 from secscan.models import CheckResult, Severity
 from secscan.reporting import write_html, write_json
 from secscan.scanner import run_scan
@@ -29,6 +30,13 @@ def _check_list(value: str) -> list[str]:
             f"unknown check(s): {', '.join(unknown) or '(none)'}; available: {', '.join(CHECKS)}"
         )
     return names
+
+
+def _port_spec(value: str) -> dict[int, str]:
+    try:
+        return parse_port_spec(value)
+    except PortSpecError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,11 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LIST",
         help=f"comma-separated checks to run (default: {','.join(CHECKS)})",
     )
+    p.add_argument(
+        "--ports",
+        type=_port_spec,
+        default=None,
+        metavar="SPEC",
+        help="ports to scan: common (default), 1-1024, 22,80,8000-8100, common,3000, all",
+    )
     p.add_argument("--timeout", type=float, default=6.0, help="TLS/HTTP timeout in seconds")
     p.add_argument(
         "--connect-timeout", type=float, default=1.0, help="per-port connect timeout in seconds"
     )
-    p.add_argument("--workers", type=int, default=50, help="parallel port-scan workers")
+    p.add_argument("--workers", type=int, default=100, help="parallel port-scan workers")
     p.add_argument(
         "--fail-on",
         choices=[s.value for s in Severity],
@@ -131,7 +146,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_ERROR
 
     config = ScanConfig(
-        connect_timeout=args.connect_timeout, timeout=args.timeout, workers=args.workers
+        connect_timeout=args.connect_timeout,
+        timeout=args.timeout,
+        workers=args.workers,
+        ports=args.ports,
     )
     checks = [CHECKS[name]() for name in args.checks]
 

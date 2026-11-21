@@ -52,6 +52,9 @@
   .grade { display: inline-block; min-width: 28px; padding: 2px 8px; border-radius: 14px; color: #fff; font-weight: 800; text-align: center; }
   .g-A { background: #18794e; } .g-B { background: #4c8b2b; } .g-C { background: #b58a00; }
   .g-D { background: #c2620c; } .g-F { background: #c0281b; }
+  h4 { margin: 14px 0 6px; font-size: 14px; }
+  .proto { display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border-radius: 4px; font-size: 12px; background: var(--info-bg); }
+  .proto-supported { background: var(--low-bg); color: var(--low); }
   .disclaimer { margin-top: 40px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
   @media (max-width: 640px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
   @media print { body { background: #fff; } .card, table { break-inside: avoid; } }
@@ -102,6 +105,7 @@
 {% for r in scan.results %}
 <section class="card">
   <h3>{{ r.title }}</h3>
+  {% for note in r.notes or [] %}<p class="desc">{{ note }}</p>{% endfor %}
   {% if r.error %}
   <p class="error">Check could not complete: {{ r.error }}</p>
   {% elif r.check == "ports" %}
@@ -117,23 +121,32 @@
     </table>
     {% endif %}
   {% elif r.check == "tls" %}
-    {% if r.data.reachable %}
-    <dl>
-      <dt>Port</dt><dd>{{ r.data.port }}</dd>
-      <dt>Protocol</dt><dd>{{ r.data.protocol or "unknown" }}</dd>
-      <dt>Subject</dt><dd>{{ r.data.subject or "unknown" }}</dd>
-      <dt>Issuer</dt><dd>{{ r.data.issuer or "unknown" }}</dd>
-      <dt>Valid until</dt><dd>{{ r.data.not_after or "unknown" }}</dd>
-      {% if r.data.verify_error %}<dt>Verification</dt><dd class="error">{{ r.data.verify_error }}</dd>{% endif %}
-    </dl>
-    {% else %}
-    <p class="desc">No TLS service answered on port {{ r.data.port }}{% if r.data.error %} ({{ r.data.error }}){% endif %}.</p>
-    {% endif %}
+    {% for ep in r.data.endpoints or [] %}
+      {% if ep.reachable %}
+      <h4>Port {{ ep.port }}</h4>
+      <dl>
+        <dt>Negotiated</dt><dd>{{ ep.protocol or "unknown" }}{% if ep.cipher %} &middot; <code>{{ ep.cipher }}</code>{% endif %}</dd>
+        <dt>Protocols</dt><dd>{% for name, status in ep.protocols.items() %}<span class="proto proto-{{ status }}">{{ name }}: {{ status }}</span> {% endfor %}</dd>
+        <dt>Weak ciphers</dt><dd>{{ ep.weak_cipher or "unknown" }}{% if ep.weak_cipher_name %} (<code>{{ ep.weak_cipher_name }}</code>){% endif %}</dd>
+        <dt>Verification</dt><dd>{{ ep.verification or "unknown" }}</dd>
+        {% if ep.certificate %}{% set c = ep.certificate %}
+        <dt>Subject</dt><dd>{{ c.subject or "none" }}</dd>
+        <dt>Names (SAN)</dt><dd>{{ c.sans | join(", ") or "none" }}</dd>
+        <dt>Issuer</dt><dd>{{ c.issuer or "unknown" }}{% if c.self_signed %} (self-signed){% endif %}</dd>
+        <dt>Valid</dt><dd>{{ c.not_before }} to {{ c.not_after }}</dd>
+        <dt>Key</dt><dd>{{ c.key_type }}{% if c.key_bits %} {{ c.key_bits }} bits{% endif %} &middot; signature {{ c.signature or "unknown" }}</dd>
+        {% endif %}
+      </dl>
+      {% endif %}
+    {% endfor %}
   {% elif r.check == "headers" %}
     <dl>
       <dt>URL</dt><dd>{{ r.data.final_url }} (HTTP {{ r.data.status_code }})</dd>
+      {% if r.data.redirects %}<dt>Redirects</dt><dd>{{ r.data.redirects | join(" → ") }} &rarr; {{ r.data.final_url }}</dd>{% endif %}
+      {% if r.data.http_redirect %}<dt>HTTP &rarr; HTTPS</dt><dd>{{ r.data.http_redirect }}</dd>{% endif %}
       <dt>Present</dt><dd>{% for h, v in r.data.present.items() %}<div><strong>{{ h }}</strong>: <code>{{ v }}</code></div>{% else %}none{% endfor %}</dd>
       <dt>Missing</dt><dd>{{ r.data.missing | join(", ") or "none" }}</dd>
+      {% if r.data.cookies %}<dt>Cookies</dt><dd>{% for c in r.data.cookies %}<div><code>{{ c.name }}</code>: Secure {{ "yes" if c.secure else "no" }}, HttpOnly {{ "yes" if c.httponly else "no" }}, SameSite {{ c.samesite or "not set" }}</div>{% endfor %}</dd>{% endif %}
     </dl>
   {% endif %}
 </section>

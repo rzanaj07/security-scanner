@@ -7,6 +7,7 @@ from typing import Any
 
 from secscan import checks as checks_module
 from secscan.checks.base import Check, ScanConfig
+from secscan.checks.ports import parse_port_spec
 from secscan.models import CheckResult
 from secscan.scanner import run_scan
 from secscan.store import ScanStore
@@ -39,14 +40,25 @@ class ScanService:
         self.store = store
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="secscan")
 
-    def submit(self, raw_target: str, check_names: list[str]) -> tuple[int, Future[None]]:
-        """Queue a scan. Raises TargetError for malformed input (resolution happens later)."""
+    def submit(
+        self, raw_target: str, check_names: list[str], ports: str | None = None
+    ) -> tuple[int, Future[None]]:
+        """Queue a scan. Raises TargetError / PortSpecError for malformed input
+        (name resolution happens later, in the background)."""
         key = target_key(raw_target)
-        scan_id = self.store.create(key, raw_target.strip(), check_names)
-        future = self._pool.submit(self._run, scan_id, raw_target, check_names)
+        port_map = parse_port_spec(ports) if ports else None
+        options = {"ports": ports} if ports else {}
+        scan_id = self.store.create(key, raw_target.strip(), check_names, options)
+        future = self._pool.submit(self._run, scan_id, raw_target, check_names, port_map)
         return scan_id, future
 
-    def _run(self, scan_id: int, raw_target: str, check_names: list[str]) -> None:
+    def _run(
+        self,
+        scan_id: int,
+        raw_target: str,
+        check_names: list[str],
+        port_map: dict[int, str] | None = None,
+    ) -> None:
         try:
             target = resolve_target(raw_target)
         except TargetError as e:
@@ -65,7 +77,7 @@ class ScanService:
 
         try:
             checks = [checks_module.CHECKS[name]() for name in check_names]
-            scan = run_scan(target, checks, ScanConfig(), on_start, on_done)
+            scan = run_scan(target, checks, ScanConfig(ports=port_map), on_start, on_done)
             self.store.finish(scan_id, scan)
         except Exception as e:  # never leave a scan stuck in "running"
             self.store.fail(scan_id, f"Internal error: {type(e).__name__}: {e}")

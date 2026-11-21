@@ -129,6 +129,10 @@ function newScanCard(checks) {
   const consent = h("input", { type: "checkbox", id: "consent" });
   const error = h("p", { class: "form-error", role: "alert" });
   const button = h("button", { class: "btn primary", type: "submit" }, "Start scan");
+  const ports = h("input", {
+    type: "text", name: "ports", autocomplete: "off", spellcheck: "false", class: "ports-input",
+    placeholder: "common (default) · e.g. 1-1024 or 22,80,8000-8100", "aria-label": "Ports to scan",
+  });
   const toggles = checks.map((c) =>
     h("label", { class: "chip-toggle" },
       h("input", { type: "checkbox", name: "check", value: c.name, checked: true }),
@@ -137,6 +141,7 @@ function newScanCard(checks) {
   const form = h("form", { class: "scan-form", novalidate: true },
     h("div", { class: "row" }, input, button),
     h("div", { class: "chips" }, h("span", { class: "muted" }, "Checks:"), toggles),
+    h("label", { class: "ports-row" }, h("span", { class: "muted" }, "Ports:"), ports),
     h("label", { class: "consent", for: "consent" }, consent,
       h("span", {}, "I own this target or have written permission from its owner to scan it.")),
     error);
@@ -152,7 +157,8 @@ function newScanCard(checks) {
     button.disabled = true;
     try {
       const { id } = await api("/api/scans", {
-        method: "POST", body: JSON.stringify({ target, checks: selected, authorized: true }),
+        method: "POST",
+        body: JSON.stringify({ target, checks: selected, ports: ports.value.trim() || null, authorized: true }),
       });
       location.hash = `#/scans/${id}`;
     } catch (e) {
@@ -266,7 +272,9 @@ async function renderScan(id) {
 
 function scanView(scan) {
   const duration = fmtDuration(scan.started_at, scan.finished_at);
-  const meta = [scan.address, fmtDate(scan.created_at), duration && `took ${duration}`].filter(Boolean).join(" · ");
+  const portsOpt = (scan.options || {}).ports;
+  const meta = [scan.address, fmtDate(scan.created_at), duration && `took ${duration}`, portsOpt && `ports ${portsOpt}`]
+    .filter(Boolean).join(" · ");
   const head = h("div", { class: "scan-head" },
     h("div", {}, h("h1", {}, scan.input), h("div", { class: "meta" }, statusLabel(scan.status), " ", meta)),
     scanActions(scan));
@@ -285,7 +293,10 @@ function scanActions(scan) {
     rescan.disabled = true;
     try {
       const { id } = await api("/api/scans", {
-        method: "POST", body: JSON.stringify({ target: scan.input, checks: scan.checks, authorized: true }),
+        method: "POST",
+        body: JSON.stringify({
+          target: scan.input, checks: scan.checks, ports: (scan.options || {}).ports || null, authorized: true,
+        }),
       });
       location.hash = `#/scans/${id}`;
     } catch (e) { toast(e.message); rescan.disabled = false; }
@@ -423,14 +434,20 @@ function checkCard(c) {
         h("tbody", {}, d.open.map((p) => h("tr", {}, h("td", { class: "num" }, p.port), h("td", {}, p.service),
           h("td", {}, p.banner ? h("code", {}, p.banner) : "—"))))));
     }
-  } else if (!c.error && c.check === "tls" && d.reachable) {
-    body.push(kv([["Port", d.port], ["Protocol", d.protocol], ["Subject", d.subject], ["Issuer", d.issuer],
-      ["Valid until", d.not_after], ["Verification", d.verify_error || "trusted"]]));
+  } else if (!c.error && c.check === "tls" && Array.isArray(d.endpoints)) {
+    for (const ep of d.endpoints.filter((e) => e.reachable)) body.push(tlsEndpoint(ep));
   } else if (!c.error && c.check === "headers" && d.url) {
     const present = Object.entries(d.present || {});
-    body.push(kv([["URL", `${d.final_url} (HTTP ${d.status_code})`],
-      ["Present", present.length ? present.map(([k, v]) => h("div", {}, h("strong", {}, k), ": ", h("code", {}, v))) : "none"],
-      ["Missing", (d.missing || []).join(", ") || "none"]]));
+    const rows = [["URL", `${d.final_url} (HTTP ${d.status_code})`]];
+    if ((d.redirects || []).length) rows.push(["Redirects", [...d.redirects, d.final_url].join(" → ")]);
+    if (d.http_redirect) rows.push(["HTTP → HTTPS", d.http_redirect]);
+    rows.push(["Present", present.length ? present.map(([k, v]) => h("div", {}, h("strong", {}, k), ": ", h("code", {}, v))) : "none"]);
+    rows.push(["Missing", (d.missing || []).join(", ") || "none"]);
+    if ((d.cookies || []).length) {
+      rows.push(["Cookies", d.cookies.map((ck) => h("div", {}, h("code", {}, ck.name), " ",
+        flag("Secure", ck.secure), flag("HttpOnly", ck.httponly), flag(`SameSite ${ck.samesite || "unset"}`, !!ck.samesite)))]);
+    }
+    body.push(kv(rows));
   }
   const n = c.findings.length;
   return h("section", { class: "card check-card" },
@@ -440,4 +457,32 @@ function checkCard(c) {
 
 function kv(pairs) {
   return h("dl", { class: "kv" }, pairs.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v === null || v === undefined || v === "" ? "—" : v)]));
+}
+
+function flag(label, ok) {
+  return h("span", { class: `flag ${ok ? "on" : "off"}` }, `${ok ? "✓" : "✗"} ${label}`);
+}
+
+const PROTO_GOOD = { "TLSv1.2": true, "TLSv1.3": true };
+function tlsEndpoint(ep) {
+  const protos = Object.entries(ep.protocols || {}).map(([name, status]) => {
+    let cls = "neutral";
+    if (status === "supported") cls = PROTO_GOOD[name] ? "good" : "bad";
+    else if (status === "rejected") cls = PROTO_GOOD[name] ? "neutral" : "good";
+    return h("span", { class: `proto ${cls}`, title: status }, `${name} ${status === "supported" ? "✓" : status === "rejected" ? "✗" : "?"}`);
+  });
+  const rows = [
+    ["Negotiated", [ep.protocol || "unknown", ep.cipher ? [" · ", h("code", {}, ep.cipher)] : null]],
+    ["Protocols", h("span", { class: "protos" }, protos)],
+    ["Weak ciphers", ep.weak_cipher === "supported" ? h("span", { class: "error-text" }, `accepted (${ep.weak_cipher_name})`) : ep.weak_cipher],
+    ["Trust", ep.verification === "trusted" ? h("span", { class: "flag on" }, "✓ trusted") : h("span", { class: "error-text" }, ep.verification)],
+  ];
+  const c = ep.certificate;
+  if (c) {
+    rows.push(["Subject", c.subject], ["Names", (c.sans || []).join(", ") || "none"],
+      ["Issuer", `${c.issuer || "unknown"}${c.self_signed ? " (self-signed)" : ""}`],
+      ["Valid", `${c.not_before} → ${c.not_after}`],
+      ["Key", `${c.key_type}${c.key_bits ? ` ${c.key_bits} bits` : ""} · signature ${c.signature || "unknown"}`]);
+  }
+  return h("div", { class: "endpoint" }, h("h4", {}, `Port ${ep.port}`), kv(rows));
 }
